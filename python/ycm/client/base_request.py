@@ -17,16 +17,16 @@
 # You should have received a copy of the GNU General Public License
 # along with YouCompleteMe.  If not, see <http://www.gnu.org/licenses/>.
 
-import vim
 import requests
 import urlparse
+from base64 import b64decode, b64encode
 from retries import retries
 from requests_futures.sessions import FuturesSession
 from ycm.unsafe_thread_pool_executor import UnsafeThreadPoolExecutor
 from ycm import vimsupport
-from ycm import utils
-from ycm.utils import ToUtf8Json
-from ycm.server.responses import ServerError, UnknownExtraConf
+from ycmd import utils
+from ycmd.utils import ToUtf8Json
+from ycmd.responses import ServerError, UnknownExtraConf
 
 _HEADERS = {'content-type': 'application/json'}
 _EXECUTOR = UnsafeThreadPoolExecutor( max_workers = 30 )
@@ -124,8 +124,8 @@ class BaseRequest( object ):
     if not request_body:
       request_body = ''
     headers = dict( _HEADERS )
-    headers[ _HMAC_HEADER ] = utils.CreateHexHmac( request_body,
-                                                   BaseRequest.hmac_secret )
+    headers[ _HMAC_HEADER ] = b64encode(
+        utils.CreateHexHmac( request_body, BaseRequest.hmac_secret ) )
     return headers
 
   session = FuturesSession( executor = _EXECUTOR )
@@ -133,24 +133,17 @@ class BaseRequest( object ):
   hmac_secret = ''
 
 
-def BuildRequestData( start_column = None,
-                      query = None,
-                      include_buffer_data = True ):
+def BuildRequestData( include_buffer_data = True ):
   line, column = vimsupport.CurrentLineAndColumn()
   filepath = vimsupport.GetCurrentBufferFilepath()
   request_data = {
-    'filetypes': vimsupport.CurrentFiletypes(),
-    'line_num': line,
-    'column_num': column,
-    'start_column': start_column,
-    'line_value': vim.current.line,
+    'line_num': line + 1,
+    'column_num': column + 1,
     'filepath': filepath
   }
 
   if include_buffer_data:
     request_data[ 'file_data' ] = vimsupport.GetUnsavedAndCurrentBufferData()
-  if query:
-    request_data[ 'query' ] = query
 
   return request_data
 
@@ -171,9 +164,10 @@ def JsonFromFuture( future ):
 
 
 def _ValidateResponseObject( response ):
-  if not utils.ContentHexHmacValid( response.content,
-                                    response.headers[ _HMAC_HEADER ],
-                                    BaseRequest.hmac_secret ):
+  if not utils.ContentHexHmacValid(
+      response.content,
+      b64decode( response.headers[ _HMAC_HEADER ] ),
+      BaseRequest.hmac_secret ):
     raise RuntimeError( 'Received invalid HMAC for response!' )
   return True
 
